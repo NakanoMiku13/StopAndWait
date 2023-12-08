@@ -2,6 +2,7 @@ import socket
 import platform
 import time
 import random
+import argparse
 try:
     import psutil
 except:
@@ -13,7 +14,8 @@ class Frame:
         self._header = 1 if header == None else header
         self.message = message
         self._received = False
-        self.__Damage__()
+        self._correct = False
+        self._last = False
     def __Damage__(self):
         rand = random.randint(0, 10)
         self._correct = False if rand > 5 else True
@@ -38,6 +40,12 @@ class Frame:
         self._received = response
     def GetHeader(self):
         return self._header
+    def SetHeader(self, header):
+        self._header = header
+    def LastFrame(self):
+        return self._last
+    def SetLast(self):
+        self._last = True
     def _VerifyError(self):
         # Create method to verify the error on the frame message
         pass
@@ -46,13 +54,15 @@ class Frame:
     def __repr__(self):
         return f"{self.message}"
     def encode(self):
-        return f"{str(self._header)}{'1' if self._correct else '0'}{self.message}".encode()
+        return f"{str(self._header)}{'1' if self._correct else '0'}{'1' if self._last else '0'}{self.message}".encode()
     def decode(self, codedContent : str):
         self._header = codedContent[0]
+        self._header = int(self._header)
         self._correct = codedContent[1]
-        self.message = codedContent[2:]
+        self._last = True if codedContent[2] == '1' else '0'
+        self.message = codedContent[3:]
 class Client:
-    def __init__(self, message : Frame, service : socket.socket, timeout = 15 ):
+    def __init__(self, message : Frame, port = 8001, server = "localhost", timeout = 15 ):
         self._header = 1
         interfaces = psutil.net_if_addrs()
         if platform.system() == "Windows":
@@ -76,7 +86,9 @@ class Client:
         self._correct = False
         self._received = False
         self._timeout = timeout
-        self.service = service
+        self.service = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server = server
+        self.port = port
     def SetTimeout(self, timeout):
         self._timeout = timeout
     def GetMyIp(self):
@@ -86,39 +98,84 @@ class Client:
     def SendMessage(self, message : str):
         # Section to codificate the message into small frames 8 bits per frame
         frames = list()
+        header = 1
+        lastElement = len(message) - 1
+        count = 0
         for i in message:
-            frames.append(Frame(str(bin(ord(i))).replace('0b','')))
+            frame = Frame(str(bin(ord(i))).replace('0b',''), header)
+            if count < lastElement:
+                count += 1
+            else:
+                frame.SetLast()
+            frames.append(frame)
+            header = 0 if header == 1 else 1
+        buffer = ""
+        lastHeader = 0
+        lastMessage = None
         for frame in frames:
-            self.service.connect(("localhost", 8001))
+            self.service = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.service.connect((self.server, self.port))
             try:
-                self.service.send(frame.encode())
-                response = self.service.recv(1024*5)
-                print(response.decode())
+                print(buffer, lastHeader)
+                """if "ACK" in buffer:
+                    
+                if "NACK" in buffer:
+                    frames.append(frame)
+                    frame = lastMessage
+                    frame.SetHeader(1 if lastHeader == 0 else 0)
+                    lastHeader = frame.GetHeader()"""
+                #elif "NACK" in buffer:
+                encoded = frame.encode()
+                self.service.send(encoded)
+                buffer = self.service.recv(1024).decode("utf-8")
             except Exception as ex:
                 print(str(ex))
-                pass
             self.service.close()
-            self.service = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-option = int(input("1) Server mode\n2) Client mode\n3) Exit\n"))
-if option == 1:
+            
+parser = argparse.ArgumentParser()
+parser.add_argument("-c", "--client", action="store_true", help="Set the program to client mode")
+parser.add_argument("-s", "--server", action="store_true", help="Set the program to server mode")
+parser.add_argument("-i", "--ip", type=str, help="Set the ip to connect to the server; default (localhost)")
+parser.add_argument("-p", "--port", type=int, help="Set the server port default 8011")
+parser.add_argument("-m", "--message", type=str, help="Set the message to send")
+args = parser.parse_args()
+if args.client or args.message:
+    client = Client(None, 8001 if not args.port else args.port , "localhost" if not args.ip else args.ip)
+    client.SendMessage("Hello, world!" if not args.message else args.message)
+elif args.server:
     service = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    service.bind(("localhost", 8001))
+    service.bind(("0.0.0.0", 8001 if not args.port else args.port ))
     print("Waiting for connection...")
     clientName = ""
     service.listen(1)
+    buffer = 0
+    messages = list()
+    decodedMessage = ""
     while 1:
         connection, address = service.accept()
         data = connection.recv(1024*5)
         message = data.decode().split(' ')[0]
-        frame = Frame("s")
-        frame.decode(message)
-        print(f"Client: {address} Sends: {frame.GetMessage()}")
-        connection.sendall("ACK".encode())
+        if data:
+            if message != "":
+                frame = Frame("s")
+                frame.decode(message)
+                print(f"Client: {address} Sends: {frame.GetMessage()} {frame.GetHeader()} {buffer} {frame.LastFrame()}")
+                if (frame.GetHeader() == buffer):
+                    connection.sendall("NACK".encode())
+                else:
+                    messages.append(bytearray(frame.GetMessage(), "utf-8"))
+                    connection.sendall(f"ACK{str(frame.GetHeader())}".encode())
+                buffer = frame.GetHeader()
+                if frame.LastFrame() == True:
+                    print("Last")
+                    for i in messages:
+                        decodedMessage += chr(int(i, 2))
+                    print(decodedMessage)
+                    decodedMessage = ""
+                    buffer = 0
+                    messages = list()
+            else:
+                connection.sendall("NACK3".encode())
     connection.close()
-elif option == 2:
-    service = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client = Client(None, service)
-    client.SendMessage("Hello, world!")
-    service.close()
 else:
-    exit()
+    print("Please set an argument -h for help")
