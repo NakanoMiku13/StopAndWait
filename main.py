@@ -109,7 +109,6 @@ class Client:
         count = 0
         for i in message:
             frame = Frame(str(bin(ord(i))).replace('0b',''), header)
-            print(frame.GetTimeOut())
             if count < lastElement:
                 count += 1
             else:
@@ -151,6 +150,7 @@ parser.add_argument("-m", "--message", type=str, help="Set the message to send")
 parser.add_argument("-t", "--timeout", type=str, help="Defines a maximum timeout to receive a message on the server (max 12)(default 5)")
 args = parser.parse_args()
 if args.client or args.message:
+    print(args.ip)
     client = Client(None, 8001 if not args.port else args.port , "localhost" if not args.ip else args.ip)
     client.SendMessage("Hello, world!" if not args.message else args.message)
 elif args.server:
