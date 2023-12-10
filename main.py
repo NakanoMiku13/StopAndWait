@@ -155,7 +155,7 @@ if args.client or args.message:
     client.SendMessage("Hello, world!" if not args.message else args.message)
 elif args.server:
     service = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    service.bind(("localhost" if not args.testserver else "", 8001 if not args.port else args.port ))
+    service.bind(("0.0.0.0" if not args.testserver else "", 8001 if not args.port else args.port ))
     print("Waiting for connection...")
     clientName = ""
     service.listen(1)
