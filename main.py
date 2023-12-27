@@ -59,12 +59,12 @@ class Frame:
         if len(binary) < 5:
             while len(binary) < 5:
                 binary = '0' + binary
-        return f"{str(self._header)}{'1' if self._correct else '0'}{'1' if self._last else '0'}{binary}{self.message}".encode()
+        return f"{str(self._header)}{'1' if self._correct else '0'}{'1' if self._last == True else '0'}{binary}{self.message}".encode()
     def decode(self, codedContent : str):
         self._header = codedContent[0]
         self._header = int(self._header)
         self._correct = codedContent[1]
-        self._last = True if codedContent[2] == '1' else '0'
+        self._last = True if codedContent[2] == '1' else False
         self._timeout = int(codedContent[3:7],2)
         self.message = codedContent[8:]
 class Client:
@@ -119,12 +119,14 @@ class Client:
         lastHeader = 0
         lastFrame = None
         count = 0
+        lastSent = None
         while(len(frames) > 0):
-            print(len(frames))
             self.service = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.service.connect((self.server, self.port))
             try:
                 frame = frames[0]
+                if frame.LastFrame() == True:
+                    lastSent = frame
                 print(lastFrame, frame, buffer)
                 if "NACK" in buffer:
                     lastFrame.SetTimeOut()
@@ -140,6 +142,18 @@ class Client:
             except Exception as ex:
                 print(str(ex))
             self.service.close()
+        buffer = ""
+        while not "ACK" in buffer:
+            self.service = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.service.connect((self.server, self.port))
+            encoded = lastSent.encode()
+            self.service.send(encoded)
+            buffer = self.service.recv(1024).decode("utf-8")
+            self.service.close()
+        if "ACK" in buffer:
+            print("Message sent")
+        else:
+            print("Error on sending message")
 parser = argparse.ArgumentParser()
 parser.add_argument("-c", "--client", action="store_true", help="Set the program to client mode")
 parser.add_argument("-s", "--server", action="store_true", help="Set the program to server mode")
@@ -161,28 +175,35 @@ elif args.server:
     service.listen(1)
     buffer = 0
     messages = list()
-    timeout = 6 if not args.timeout else args.timeout
+    timeout = 6 if not args.timeout else int(args.timeout)
     decodedMessage = ""
+    nackCount = 0
     while 1:
         connection, address = service.accept()
         data = connection.recv(1024*5)
         message = data.decode().split(' ')[0]
+        if nackCount > 20:
+            print("Connection error, restart server...\nToo many errors: ", nackCount)
+            connection.close()
+            exit()
         if data:
             if message != "":
                 frame = Frame("s")
                 frame.decode(message)
                 if(frame.GetTimeOut() > timeout):
                     connection.sendall("NACK".encode())
+                    nackCount += 1
                 else:
                     print(f"Client: {address} Sends: {frame.GetMessage()} {frame.GetHeader()} {buffer} {frame.LastFrame()}")
                     if (frame.GetHeader() == buffer):
                         connection.sendall("NACK".encode())
+                        nackCount += 1
                     else:
                         messages.append(bytearray(frame.GetMessage(), "utf-8"))
                         connection.sendall(f"ACK{str(frame.GetHeader())}".encode())
                         buffer = frame.GetHeader()
-                    if frame.LastFrame() == True:
-                        print("Last")
+                        nackCount = 0
+                    if frame.LastFrame() == True or message[2] == '1':
                         for i in messages:
                             decodedMessage += chr(int(i, 2))
                         print(decodedMessage)
