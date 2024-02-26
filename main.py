@@ -47,9 +47,6 @@ class Frame:
         return self._timeout
     def SetTimeOut(self):
         self._timeout = random.randint(1, 15)
-    def _VerifyError(self):
-        # Create method to verify the error on the frame message
-        pass
     def __str__(self):
         return f"{self.message}"
     def __repr__(self):
